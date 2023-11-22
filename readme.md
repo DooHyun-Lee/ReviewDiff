@@ -14,6 +14,7 @@
       - item id(asin)
 
 # Data folder structure
+```
 ├── embeddings
 │   └── distilbert
 │       └── embeddings_768.pckl
@@ -23,6 +24,7 @@
 └── raw
     ├── Automotive_5.json.gz
     └── meta_Automotive.json.gz
+```
 
 # Preprocessed data format
 **train_data** is a list where each entry is a trajectory, which is a list of dicts each representing a product.
