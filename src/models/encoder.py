@@ -16,8 +16,8 @@ class InverseDynamics(nn.Module) :
         super().__init__ () 
         
         self.item_embedding_lookup_table = item_embeddings  # key : asin , value : embedding
-        self.item_to_idx = {item : idx for idx, item in enumerate(self.item_embedding_lookup_table.keys())} # key : asin, value : idx 
-        self.idx_to_item= {idx : item for item, idx in self.item_to_idx.items()} # key : idx, value : asin 
+        self.asin_to_idx = {asin : idx for idx, asin in enumerate(self.item_embedding_lookup_table.keys())} # key : asin, value : idx 
+        self.idx_to_asin= {idx : asin for asin, idx in self.item_to_idx.items()} # key : idx, value : asin 
         self.emb_dim = emb_dim  
         self.expansion_ratio = expansion_ratio 
         self.dropout_rate = dropout_rate 
@@ -39,9 +39,9 @@ class InverseDynamics(nn.Module) :
         
         
     def forward(self, emb1, emb2):
-        self.mlp(torch.cat([emb1, emb2], dim = -1)) # [batch_size, 2*h] -> [batch_size, h]
-        scores = self.get_dot_products(emb1) # [batch_size, N] 
-        return scores
+        output_emb = self.mlp(torch.cat([emb1, emb2], dim = -1)) # [batch_size, 2*h] -> [batch_size, h]
+        return  self.get_dot_products(output_emb) # [batch_size, N] 
+    
     
         
     def predict(self, emb1, emb2, topk = 10):
@@ -54,14 +54,18 @@ class InverseDynamics(nn.Module) :
 
          
 class EncoderInverseDynamics(nn.Module) : 
-    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, mode = "cls") : 
+    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, max_len = 512, mode = "cls", freeze_bert = False) : 
         super().__init__() 
         
         assert mode in ["last_hidden_state", "average_hidden_state"], "Invalid mode" 
         self.mode = mode 
         self.encoder = encoder 
         self.inverse_dynamics = inverse_dynamics(hidden_dim = encoder.hidden_dim, item_embedding_lookup_table = item_embedding_lookup_table)
-        
+        self.freeze_bert = freeze_bert 
+        if self.freeze_bert : 
+            for param in self.encoder.parameters() : 
+                param.requires_grad = False 
+                
     def forward(self, state1 : torch.Tensor, state2 : torch.Tensor) :
         """
         Args:
@@ -92,9 +96,11 @@ class EncoderInverseDynamics(nn.Module) :
 
 if __name__ == "__main__" :
     model, tokenizer = getTinyBert()
-    print(model)
-    print(tokenizer)
-    
+    sample = "This is a sample sentence. [SEP] This is another sample sentence." 
+    print(tokenizer(sample, padding='max_length', max_length = 512, truncation = False)) 
+    print(type(tokenizer.encode(sample, padding = True, max_length = 512, truncation = True)))
+    print(tokenizer.decode(tokenizer.encode(sample))) 
     model, tokenizer = getDistilBert()
-    print(model)
-    print(tokenizer) 
+    print(tokenizer(sample))
+    print(tokenizer.encode(sample))
+    print(tokenizer.decode(tokenizer.encode(sample)))
