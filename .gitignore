@@ -2,3 +2,4 @@ preprocess/meta_data.json
 preprocess/train_data.json
 preprocess/data
 scratchpad.ipynb
+.env

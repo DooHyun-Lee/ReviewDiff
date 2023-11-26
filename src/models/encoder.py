@@ -62,15 +62,15 @@ class InverseDynamics(nn.Module) :
 
          
 class EncoderInverseDynamics(nn.Module) : 
-    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, max_len = 512, mode = "cls", freeze_bert = True) : 
+    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, max_len = 512, mode = "cls", freeze_encoder = True) : 
         super().__init__() 
         
         assert mode in ["last_hidden_state", "average_hidden_state", "cls"], f"Invalid mode : {mode}"
         self.mode = mode 
         self.encoder = encoder 
         self.inverse_dynamics = inverse_dynamics
-        self.freeze_bert = freeze_bert 
-        if self.freeze_bert : 
+        self.freeze_encoder = freeze_encoder 
+        if self.freeze_encoder : 
             for param in self.encoder.parameters() : 
                 param.requires_grad = False 
                 

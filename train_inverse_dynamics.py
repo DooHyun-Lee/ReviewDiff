@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 
 from multiprocessing import Pool
+from dotenv import load_dotenv
+
 
 def parse_args() : 
     parser = argparse.ArgumentParser(description='Training inverse dynamics model and save it')
@@ -27,6 +29,7 @@ def parse_args() :
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
     parser.add_argument('--enc_lr', type=float, default=1e-3, help='Learning rate for encoder')
     parser.add_argument('--inv_lr', type=float, default=1e-4, help='Learning rate for inverse dynamics')
+    parser.add_argument('--log_interval', type=int, default=100, help='Interval for logging')
     
     # paths
     parser.add_argument('--save_path', type=str, default="./output/ckpt/inverse_dynamics", help='Path to save the model')
@@ -73,9 +76,10 @@ class EncoderDataset(torch.utils.data.Dataset) :
         tokenizer_list = [copy.deepcopy(tokenizer)] * num_processes 
         asin_to_idx_list = [asin_to_idx] * num_processes 
         
-        # multiprocess with tqdm
+        # multiprocess
         with Pool(num_processes) as p :
-            results = p.starmap(self._process_sequences, zip(split_sequences, tokenizer_list, asin_to_idx_list, [max_len] * num_processes, [sep_token] * num_processes))
+            results = p.starmap(self._process_sequences, 
+                                zip(split_sequences, tokenizer_list, asin_to_idx_list, [max_len] * num_processes, [sep_token] * num_processes))
         
         # concatenate results 
         for result in results : 
@@ -84,6 +88,7 @@ class EncoderDataset(torch.utils.data.Dataset) :
             self.actions += result[2]
             self.labels += result[3] 
             
+        del sequences, split_sequences, tokenizer_list, asin_to_idx_list, results
             
                 
     def _process_sequences(self, sequences, tokenizer, asin_to_idx, max_len, sep_token) :
@@ -140,7 +145,8 @@ class EncoderDataset(torch.utils.data.Dataset) :
                 "attn_mask2": torch.tensor(state2["attention_mask"]),
                 "label": torch.tensor(label)}
 
-def training(model : nn.Module, 
+def training(args, 
+             model : nn.Module, 
              train_dataloader: DataLoader, 
              test_dataloader: DataLoader, 
              enc_optimizer, inv_optimizer, 
@@ -168,7 +174,7 @@ def training(model : nn.Module,
         model.train()
         train_loss = []
         num_train_data = 0 
-        for batch in train_dataloader:
+        for batch in tqdm(train_dataloader):
             
             num_train_data += len(batch) 
             enc_optimizer.zero_grad()
@@ -190,6 +196,8 @@ def training(model : nn.Module,
             
             # logging -> TODO : add wandb logging 
             train_loss.append(loss.detach().item())
+            if len(train_loss) % args.log_interval == 0 :
+                print(f"Epoch {e} | Train loss: {np.mean(train_loss)}")
             
             # HR and NDCG 
             recommendations = torch.argsort(preds, dim = -1, descending = True).detach().cpu().numpy() # [batch_size, num_items]
@@ -197,15 +205,15 @@ def training(model : nn.Module,
             hr = HR(recommendations, label)
             ndcg = NDCG(recommendations, label)
             for topk in topks : 
-                train_HR_epoch[topk].append(hr[topk])
-                train_NDCG_epoch[topk].append(ndcg[topk]) 
+                train_HR_epoch[topk].append(hr[topk] * len(batch)) 
+                train_NDCG_epoch[topk].append(ndcg[topk] * len(batch)) 
             
             
         # test code 
         model.eval()
         test_loss = [] 
         with torch.no_grad():
-            for batch in test_dataloader:
+            for batch in tqdm(test_dataloader):
                 state1 = batch["state1"].to(device)
                 state2 = batch["state2"].to(device)
                 attn_mask1 = batch["attn_mask1"].to(device) 
@@ -222,29 +230,26 @@ def training(model : nn.Module,
                 test_hr = HR(recommendations, label)
                 test_ndcg = NDCG(recommendations, label)
                 for topk in topks : 
-                    test_HR_epoch[topk].append(test_hr[topk])
-                    test_NDCG_epoch[topk].append(test_ndcg[topk]) 
+                    test_HR_epoch[topk].append(test_hr[topk] * len(batch))
+                    test_NDCG_epoch[topk].append(test_ndcg[topk] * len(batch)) 
                
         train_epoch_loss.append(np.mean(train_loss))
         test_epoch_loss.append(np.mean(test_loss))
         
-        print("=====================================")
         print(f"Training Report for Epoch {e}")
         print(f"Train loss: {np.mean(train_loss)} | Test loss: {np.mean(test_loss)}")
-        print(" ".join([f"Train HR@{topk}: {np.mean(train_HR_epoch[topk])}" for topk in topks]))
-        print(" ".join([f"Train NDCG@{topk}: {np.mean(train_NDCG_epoch[topk])}" for topk in topks]))
-        print(" ".join([f"Test HR@{topk}: {np.mean(test_HR_epoch[topk])}" for topk in topks]))
-        print(" ".join([f"Test NDCG@{topk}: {np.mean(test_NDCG_epoch[topk])}" for topk in topks]))
+        print(" ".join([f"Train HR@{topk}: {np.sum(train_HR_epoch[topk]) / num_train_data}" for topk in topks])) 
+        print(" ".join([f"Train NDCG@{topk}: {np.sum(train_NDCG_epoch[topk]) / num_train_data}" for topk in topks]))
+        print(" ".join([f"Test HR@{topk}: {np.sum(test_HR_epoch[topk]) / len(test_dataloader.dataset)}" for topk in topks]))
+        print(" ".join([f"Test NDCG@{topk}: {np.sum(test_NDCG_epoch[topk]) / len(test_dataloader.dataset)}" for topk in topks]))
         print("=====================================")
         
         
         # save model 
         if np.mean(test_loss) < best_loss : 
-            print("Saving model...") 
             torch.save(model.state_dict(), save_file_name)
             best_loss = np.mean(test_loss) 
-            print("Model saved")
-
+            
     print("Training complete")
     
     return {"train_loss_log": train_epoch_loss, "test_loss_log": test_epoch_loss, "num_train_data": num_train_data, "time": time.time() - start_time}
@@ -294,6 +299,9 @@ def get_item_embeddings(meta_data, tokenizer, encoder : nn.Module, emb_dim, devi
     return asin_to_idx, idx_to_asin, item_embeddings
         
 def main(args) : 
+    # load env
+    load_dotenv(verbose=True)
+    
     # device 
     device = torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")  # use gpu if available 
     print(f"Device: {device}")
@@ -351,7 +359,9 @@ def main(args) :
     model = EncoderInverseDynamics(encoder, 
                                    inverse_dynamics, 
                                    item_embedding_lookup_table = item_embeddings, 
-                                   mode = args.mode) 
+                                   mode = args.mode,
+                                   max_len = args.max_len,
+                                   freeze_encoder = args.freeze_encoder) 
     
     # define loss function
     loss_fn = nn.CrossEntropyLoss()    
@@ -361,7 +371,7 @@ def main(args) :
     inv_optim = optim.Adam(model.inverse_dynamics.parameters(), lr = args.inv_lr) 
     
     # training
-    train_log = training(model, train_dataloader, test_dataloader, enc_optim, inv_optim, loss_fn, args.epochs, device, args.save_path) 
+    train_log = training(args, model, train_dataloader, test_dataloader, enc_optim, inv_optim, loss_fn, args.epochs, device, args.save_path) 
     
     # save training log
     with open(os.path.join(args.save_path, "train_log.json"), "w") as f : 
