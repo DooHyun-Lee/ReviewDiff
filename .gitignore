@@ -3,3 +3,4 @@ preprocess/train_data.json
 preprocess/data
 scratchpad.ipynb
 .env
+**/__pycache__/

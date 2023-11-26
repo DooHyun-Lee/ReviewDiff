@@ -14,9 +14,9 @@ def HR(recommendations, targets, topks: List[int] = [3, 5, 10, 20, 100]) -> floa
     assert max(topks) <= recommendations.shape[1], "k is larger than the number of recommendations" 
     ans = {}
     for topk in topks :
-        hit = np.sum(np.isin(targets, recommendations[:, :topk]))
+        # check whether the target is in the topk recommendations 
+        hit = np.where(recommendations[:, :topk] == targets, 1, 0).sum()
         ans[topk] = hit / len(targets) 
-        
     return ans 
 
 
@@ -35,8 +35,8 @@ def NDCG(recommendations, targets,  topks: List[int] = [3, 5, 10, 20, 100]) -> f
     ans = {}
     
     for topk in topks :
-        dcg = np.sum(np.isin(recommendations[:, :topk], targets) / np.log2(np.arange(2, topk + 2)))
-        idcg = np.sum(1 / np.log2(np.arange(2, topk + 2)))
-        ans[topk] = dcg / idcg
+        dcg = np.where(recommendations[:, :topk] == targets, 1, 0) / np.log2(np.arange(2, topk + 2)).sum()
+        ans[topk] = dcg / len(targets) * np.log2(2)
+        
     return ans
     
