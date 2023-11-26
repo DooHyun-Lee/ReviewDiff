@@ -24,6 +24,9 @@ from dotenv import load_dotenv
 def parse_args() : 
     parser = argparse.ArgumentParser(description='Training inverse dynamics model and save it')
     
+    # debug 
+    parser.add_argument('--debug', action='store_true', help='debug mode')
+    
     # training parameters
     parser.add_argument('--epochs', type=int, default=20, help='Number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
@@ -175,13 +178,13 @@ def training(args,
         train_loss = []
         num_train_data = 0 
         for batch in tqdm(train_dataloader):
-            
-            num_train_data += len(batch) 
+        
             enc_optimizer.zero_grad()
             inv_optimizer.zero_grad()
 
             state1 = batch["state1"].to(device)
             state2 = batch["state2"].to(device)
+            num_train_data += state1.shape[0]
             attn_mask1 = batch["attn_mask1"].to(device) 
             attn_mask2 = batch["attn_mask2"].to(device) 
             
@@ -205,8 +208,8 @@ def training(args,
             hr = HR(recommendations, label)
             ndcg = NDCG(recommendations, label)
             for topk in topks : 
-                train_HR_epoch[topk].append(hr[topk] * len(batch)) 
-                train_NDCG_epoch[topk].append(ndcg[topk] * len(batch)) 
+                train_HR_epoch[topk].append(hr[topk] * state1.shape[0]) 
+                train_NDCG_epoch[topk].append(ndcg[topk] * state1.shape[0])
             
             
         # test code 
@@ -230,8 +233,8 @@ def training(args,
                 test_hr = HR(recommendations, label)
                 test_ndcg = NDCG(recommendations, label)
                 for topk in topks : 
-                    test_HR_epoch[topk].append(test_hr[topk] * len(batch))
-                    test_NDCG_epoch[topk].append(test_ndcg[topk] * len(batch)) 
+                    test_HR_epoch[topk].append(test_hr[topk] * state1.shape[0])
+                    test_NDCG_epoch[topk].append(test_ndcg[topk] * state1.shape[0])
                
         train_epoch_loss.append(np.mean(train_loss))
         test_epoch_loss.append(np.mean(test_loss))
@@ -333,6 +336,9 @@ def main(args) :
     # load dataset
     train_sequences = json.load(open(args.data_path, "r")) # List[List[dict]]
     
+    if args.debug :
+        train_sequences = train_sequences[:1000] # debug mode 
+    
     # ramdomly split train_sequence into train and test
     np.random.shuffle(train_sequences)
     test_sequences = train_sequences[:int(len(train_sequences) * 0.2)]
@@ -381,10 +387,3 @@ if __name__ == "__main__" :
 
     args = parse_args()
     main(args)
-
-
-
-
-
-
-
