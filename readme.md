@@ -54,3 +54,14 @@ The embeddings are stored in a pickle file, organized as a list of trajectories,
 - embedding: A NumPy array representing the sentence embedding of the product's attributes. The embeddings are generated using the DistilBERT model and currently have a dimension of 768.
 - review: The review rating of the product.
 - asin: The Amazon Standard Identification Number (ASIN) of the product.
+
+
+# Training Inverse Dynamics Model 
+```bash
+pip install -r requirements.txt 
+python train.py --data_path ./data/preprocessed/train_data.json --save_path ./data/model/ --batch_size 128 --lr 0.0001 --epochs 20-
+```
+It took 2 ~ 3 minutes to preprocess data to match max_len 512 or other max_len you want. 
+
+
+
