@@ -1,23 +1,30 @@
 import torch
+import numpy as np
+
 from torch import nn
+
 from transformers import DistilBertModel, DistilBertTokenizer
 from transformers import AutoTokenizer, AutoModel
 
+
 def getDistilBert(model_name = "distilbert-base-uncased") : 
-    return DistilBertModel.from_pretrained(model_name), DistilBertTokenizer.from_pretrained(model_name) 
+    return DistilBertModel.from_pretrained(model_name), DistilBertTokenizer.from_pretrained(model_name), 768
 
 def getTinyBert(model_name = "bert-tiny"):
     assert model_name in ["bert-tiny", "bert-mini", "bert-small", "bert-medium"], "Invalid model name" 
+    embedding_size = {"bert-tiny" : 128, "bert-mini" : 256, "bert-small" : 512, "bert-medium" : 768}
+    size = embedding_size[model_name]
     model_name= f"prajjwal1/{model_name}"
-    return AutoModel.from_pretrained(model_name), AutoTokenizer.from_pretrained(model_name)  
+    return AutoModel.from_pretrained(model_name), AutoTokenizer.from_pretrained(model_name), size
 
 class InverseDynamics(nn.Module) :
-    def __init__(self, emb_dim, expansion_ratio : int, dropout_rate : float, item_embeddings : dict): 
+    def __init__(self, emb_dim, expansion_ratio : int, dropout_rate : float, asin_to_idx : dict, idx_to_asin : dict, item_embeddings : np.ndarray): 
         super().__init__ () 
         
         self.item_embedding_lookup_table = item_embeddings  # key : asin , value : embedding
-        self.asin_to_idx = {asin : idx for idx, asin in enumerate(self.item_embedding_lookup_table.keys())} # key : asin, value : idx 
-        self.idx_to_asin= {idx : asin for asin, idx in self.item_to_idx.items()} # key : idx, value : asin 
+        self.asin_to_idx = asin_to_idx # key : asin, value : idx 
+        self.idx_to_asin = idx_to_asin # key : idx, value : asin 
+        
         self.emb_dim = emb_dim  
         self.expansion_ratio = expansion_ratio 
         self.dropout_rate = dropout_rate 
@@ -29,7 +36,8 @@ class InverseDynamics(nn.Module) :
                                  nn.Linear(expansion_ratio*emb_dim, emb_dim))
         
         self.num_items = len(self.item_embedding_lookup_table) # key : item_id, value : embedding 
-        self.lookuptensor = torch.tensor(list(self.item_embedding_lookup_table.values())) # N x H 
+        self.lookuptensor = torch.tensor(item_embeddings, dtype = torch.float32) # [N, emb_dim]
+        self.lookuptensor = nn.Parameter(self.lookuptensor, requires_grad = False) # [N, emb_dim] 
         
     def get_dot_products(self, output_emb) : 
         # output_emb : [batch_size, emb_dim]
@@ -54,19 +62,19 @@ class InverseDynamics(nn.Module) :
 
          
 class EncoderInverseDynamics(nn.Module) : 
-    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, max_len = 512, mode = "cls", freeze_bert = False) : 
+    def __init__(self, encoder, inverse_dynamics, item_embedding_lookup_table, max_len = 512, mode = "cls", freeze_bert = True) : 
         super().__init__() 
         
-        assert mode in ["last_hidden_state", "average_hidden_state"], "Invalid mode" 
+        assert mode in ["last_hidden_state", "average_hidden_state", "cls"], f"Invalid mode : {mode}"
         self.mode = mode 
         self.encoder = encoder 
-        self.inverse_dynamics = inverse_dynamics(hidden_dim = encoder.hidden_dim, item_embedding_lookup_table = item_embedding_lookup_table)
+        self.inverse_dynamics = inverse_dynamics
         self.freeze_bert = freeze_bert 
         if self.freeze_bert : 
             for param in self.encoder.parameters() : 
                 param.requires_grad = False 
                 
-    def forward(self, state1 : torch.Tensor, state2 : torch.Tensor) :
+    def forward(self, state1 : torch.Tensor, attn_mask1, state2 : torch.Tensor, attn_mask2) :
         """
         Args:
             state1 (torch.Tensor): (batch_size, seq_len)  # tokenized integer sequence s_{t}
@@ -74,8 +82,8 @@ class EncoderInverseDynamics(nn.Module) :
         """
 
         # get the embedding for the states  
-        state1 = self.encoder(state1) # [batch_size, seq_len, hidden_dim]
-        state2 = self.encoder(state2) # [batch_size, seq_len, hidden_dim] 
+        state1 = self.encoder(state1, attn_mask1).last_hidden_state # [batch_size, seq_len, hidden_dim]
+        state2 = self.encoder(state2, attn_mask2).last_hidden_state # [batch_size, seq_len, hidden_dim] 
         
         # choose what to use for total embedding for the state 
         if self.mode == "last_hidden_state" : 
@@ -100,6 +108,7 @@ if __name__ == "__main__" :
     print(tokenizer(sample, padding='max_length', max_length = 512, truncation = False)) 
     print(type(tokenizer.encode(sample, padding = True, max_length = 512, truncation = True)))
     print(tokenizer.decode(tokenizer.encode(sample))) 
+    
     model, tokenizer = getDistilBert()
     print(tokenizer(sample))
     print(tokenizer.encode(sample))

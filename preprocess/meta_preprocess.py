@@ -5,7 +5,7 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--path', default='/home/doolee13/ReviewDiff/preprocess/data', type=str)
+parser.add_argument('--path', default='./preprocess/data', type=str)
 
 args = parser.parse_args()
 
@@ -37,6 +37,7 @@ def extract_meta_data(path, meta_data, selected_asins):
             attr_dict['title'] = title
             attr_dict['brand'] = brand
             attr_dict['category'] = cat
+            attr_dict['attribute'] = f"This product, titled '{title}' and branded as {brand}, falls under the category of {cat}."
             meta_data[asin] = attr_dict
     return title_len, total_num
 
@@ -62,6 +63,8 @@ if __name__ == '__main__':
 
     # asin and title in meta file
     # asin, reviewerID, summary in 5-core file
+    
+    # only consider asins that are in both meta and seq files -> which has at least 1 review, ignores long-tail items
     selected_asins = meta_asins & seq_asins
     print(f'Meta has {len(meta_asins)} Asins.')
     print(f'Seq has {len(seq_asins)} Asins.')
