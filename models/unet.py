@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.distributions import Bernoulli
-from unet_components import SinusoidalPosEmb, Conv1dBlock, ResidualTemporalBlock, Downsample1d, Upsample1d
+from .unet_components import SinusoidalPosEmb, Conv1dBlock, ResidualTemporalBlock, Downsample1d, Upsample1d
 import einops
-
 
 class TemporalUnet(nn.Module):
     def __init__(
@@ -58,14 +57,14 @@ class TemporalUnet(nn.Module):
             is_last = i >= (num_resolutions -1)
             self.downs.append(nn.ModuleList([
                 ResidualTemporalBlock(dim_in, dim_out, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=embed_dim, horizon=horizon, kenerl_size=kernel_size, mish=mish),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
         if not is_last:
             horizon = horizon // 2
         
-        mid_dim = dim[-1]
+        mid_dim = dims[-1]
         self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish)
         self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon, kernel_size=kernel_size, mish=mish)
 

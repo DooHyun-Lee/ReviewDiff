@@ -1,3 +1,4 @@
+from .inverse_model import InverseDynamics
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,14 +30,17 @@ class WeightedStateL2(WeightedStateLoss):
 
 # inv dynamcis seperate training 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, model, horizon, obs_dim, action_dim, n_timesteps=200, 
-                 clip_denoised=True, predict_epsilon=True, hidden_dim=256,
-                 action_weight=10, loss_discount=1.0, loss_weights=None, returns_condition=True,
+    def __init__(self, model, embedding_lookup, horizon, obs_dim, action_dim, item_num, n_timesteps=200, 
+                 clip_denoised=True, predict_epsilon=True, dropout=0.1, hidden_dim=256,
+                 loss_discount=1.0, loss_weights=None, returns_condition=True,
                  condition_guidance_w=1.2, train_only_inv=False, train_only_diff=True):
         super().__init__()
+        self.embedding_lookup = embedding_lookup
         self.horizon = horizon # in terms of episode t 
         self.obs_dim = obs_dim
         self.action_dim = action_dim
+        self.item_num = item_num
+        self.dropout = dropout
         self.model = model # Unet model
         self.returns_condition = returns_condition
         self.condition_guidance_w = condition_guidance_w
@@ -80,14 +84,17 @@ class GaussianDiffusion(nn.Module):
             torch.log(torch.clamp(posterior_variance, min=1e-20)))
 
         # ------------ sampling ----------------
-
+        '''
         self.inv_model = nn.Sequential(
             nn.Linear(2 * self.obs_dim, hidden_dim),
             nn.ReLU(),
+            nn.Dropout(self.dropout),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, self.action_dim)
+            nn.Linear(hidden_dim, self.item_num)
         )
+        '''
+        self.inv_model = InverseDynamics(self.obs_dim, self.dropout, embedding_lookup)
 
     def get_loss_weights(self, discount):
         self.action_weight = 1
@@ -108,12 +115,12 @@ class GaussianDiffusion(nn.Module):
         out = a.gather(-1,t)
         return out.reshape(b, *((1,) *(len(x_shape)-1)))
 
-    def apply_conditioning(self, x, conditions):
+    def apply_conditioning(self, x, conditions, action_dim):
         # cond : {0 : obs at timestep 0}
         # x_start : [batch, horizon, obs_dim]
         for t, val in conditions.items():
             # set timestep 0 val
-            x[:, t, :] = val.clone()
+            x[:, t, action_dim:] = val.clone()
         return x
 
     # These funcs are used for training diffuser # 
@@ -133,12 +140,12 @@ class GaussianDiffusion(nn.Module):
         # x_start : [batch, horizon, obs_dim]
         noise = torch.rand_like(x_start)
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_noisy = self.apply_conditioning(x_noisy, cond)
+        x_noisy = self.apply_conditioning(x_noisy, cond, 0)
 
         x_recon = self.model(x_noisy, cond, t, returns)
 
         if not self.predict_epsilon:
-            x_recon = self.apply_conditioning(x_recon, cond)
+            x_recon = self.apply_conditioning(x_recon, cond, 0)
         
         if self.predict_epsilon:
             loss, info = self.loss_fn(x_recon, noise)
@@ -148,7 +155,7 @@ class GaussianDiffusion(nn.Module):
         return loss, info
 
     def loss(self, x, cond, returns = None):
-        # x : [batch, horizon, obs_dim] trajectories
+        # x : [batch, horizon, 1+obs_dim] trajectories
         # cond : {0 : [batch, obs_dim]} condition
         # returns : [batch, 1]
 
@@ -156,8 +163,34 @@ class GaussianDiffusion(nn.Module):
         # currently only diffusion trainig
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        diffusion_loss, info = self.p_losses(x, cond, t, returns)
-        return diffusion_loss, info
+        diffusion_loss, info = self.p_losses(x[:, :, self.action_dim:], cond, t, returns)
+        '''
+        # inv dynamic loss
+        x_t = x[:, :-1, self.action_dim:]
+        x_t_1 = x[:, 1:, self.action_dim:]
+        x_comb_t = torch.cat([x_t, x_t_1], dim=-1)
+        x_comb_t = x_comb_t.reshape(-1, 2 * self.obs_dim)
+        a_t = x[:, :-1, :self.action_dim]
+        #a_t_flat = a_t.view(-1, self.action_dim)
+        a_t_flat = a_t.reshape(-1).to(torch.int64)
+        pred_a_t = self.inv_model(x_comb_t)
+        inv_loss = F.cross_entropy(pred_a_t, a_t_flat)
+        loss = (1/2) * (diffusion_loss + inv_loss)
+        '''
+        loss = diffusion_loss
+        return loss , info
+
+    def loss_inv_dyn(self, x, cond, returns=None):
+        x_t = x[:, :-1, self.action_dim:]
+        x_t_1 = x[:, 1:, self.action_dim:]
+        x_comb_t = torch.cat([x_t, x_t_1], dim=-1)
+        x_comb_t = x_comb_t.reshape(-1, 2 * self.obs_dim)
+        a_t = x[:, :-1, :self.action_dim]
+        #a_t_flat = a_t.view(-1, self.action_dim)
+        a_t_flat = a_t.reshape(-1).to(torch.int64)
+        pred_a_t = self.inv_model(x_comb_t)
+        inv_loss = F.cross_entropy(pred_a_t, a_t_flat)
+        return inv_loss
 
     # end of funcs for training 
 
@@ -173,11 +206,11 @@ class GaussianDiffusion(nn.Module):
 
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
-            self.extract(self.posteriro_mean_coef1, t, x_t.shape) * x_start + 
+            self.extract(self.posterior_mean_coef1, t, x_t.shape) * x_start + 
             self.extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
         )
         posterior_variance = self.extract(self.posterior_variance, t, x_t.shape)
-        posterior_log_variance_clipped = self.extract(self.posterior_log_variance, t, x_t.shape)
+        posterior_log_variance_clipped = self.extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, cond, t, returns=None):
@@ -216,22 +249,19 @@ class GaussianDiffusion(nn.Module):
         batch_size = shape[0]
         # start from the noise
         x = 0.5*torch.randn(shape, device=device)
-        x = self.apply_conditioning(x, cond)
+        x = self.apply_conditioning(x, cond, 0)
 
         for i in reversed(range(0, self.n_timesteps)):
             timesteps = torch.full((batch_size, ), i, device=device, dtype=torch.long)
             x = self.p_sample(x, cond, timesteps, returns)
-            x = self.apply_conditioning(x, cond)
+            x = self.apply_conditioning(x, cond, 0)
         return x
 
     @torch.no_grad()
     def conditional_sample(self, cond, returns=None, horizon=None, *args, **kwargs):
-        device = self.betas.device
+        #device = self.betas.device
         batch_size = len(cond[0])
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.obs_dim)
         return self.p_sample_loop(shape, cond, returns, *args, **kwargs)
-
-    
-
     # end of funcs for sampling

@@ -21,7 +21,7 @@ class SinusoidalPosEmb(nn.Module):
 class Downsample1d(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.conv = nn.Covn1(dim, dim, 3, 2, 1)
+        self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
 
     # half the horizon 
     def forward(self, x):
@@ -29,6 +29,7 @@ class Downsample1d(nn.Module):
 
 class Upsample1d(nn.Module):
     def __init__(self, dim):
+        super().__init__()
         self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
     
     # double the horizon
@@ -39,6 +40,7 @@ class Conv1dBlock(nn.Module):
     # modified conv1d with additional groupnorm and activation 
     # spatial dimension is maintained
     def __init__(self, inp_channels, out_channels, kernel_size, mish=True, n_groups=8):
+        super().__init__()
         if mish:
             act_fn = nn.Mish()
         else:
