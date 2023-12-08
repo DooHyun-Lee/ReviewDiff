@@ -6,22 +6,22 @@ import argparse
 
 parser = argparse.ArgumentParser()
 # Unet Configs
-parser.add_argument('--horizion', default=4, type=int, help='column length for diffusion')
+parser.add_argument('--horizion', default=8, type=int, help='column length for diffusion')
 parser.add_argument('--transition_dim', default=128, type=int, help='obs embedding size') 
 parser.add_argument('--cond_dim', default=128, type=int, help='obs embedding size (not used!)') 
 parser.add_argument('--dim', default=128, type=int, help='hidden dimension for diffusion model') 
 parser.add_argument('--dim_mults', default=(1,2,4,8), type=tuple, help='factor for hidden dimension') 
 parser.add_argument('--returns_condition', default=True, help='using condition for diffusion model') 
 parser.add_argument('--condition_dropout', default=0.25, type=float) 
-parser.add_argument('--kernel_size', default=5, type=int, help='kernel size for conv1d in Unet') 
+parser.add_argument('--kernel_size', default=5, type=int, help='kernel size for conv1d in Unet') # default 5
 # Diffusion model Configs
 parser.add_argument('--action_dim', default=1, help='we are using item index')  
-parser.add_argument('--n_timesteps', default=200, type=int, help='T for diffusion') 
+parser.add_argument('--n_timesteps', default=200, type=int, help='T for diffusion') # default 200
 parser.add_argument('--clip_denoised', default=True, help='activate clip during sampling') 
-parser.add_argument('--predict_epsilon', default=True, help='Unet will predict epsilon') 
+parser.add_argument('--predict_epsilon', default=False, help='Unet will predict epsilon') # default True
 parser.add_argument('--hidden_dim', default=256, type=int, help='dim for inv dynamics') 
 parser.add_argument('--dropout', default=0.1, type=float, help='dim for inv dynamics') 
-parser.add_argument('--loss_discount', default=1.0, type=float, help='discount along horizon in diffusion') 
+parser.add_argument('--loss_discount', default=1.0, type=float, help='discount along horizon in diffusion') # default 1.0
 parser.add_argument('--condition_guidance_w', default=1.2, type=float, help='classifier free guidance constant') 
 parser.add_argument('--train_only_inv', default=False)
 parser.add_argument('--train_only_diff', default=False)

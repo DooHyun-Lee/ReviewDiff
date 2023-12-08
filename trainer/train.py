@@ -158,6 +158,7 @@ class Trainer:
                     print('------------------------------------------------')
                 self.model.train()         
 
+            self.test_every = 1
             if (self.step+1) % self.test_every == 0:
                 self.ema_model.eval()
                 self.model.eval()

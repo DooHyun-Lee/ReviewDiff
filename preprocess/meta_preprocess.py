@@ -3,6 +3,7 @@ import json
 from tqdm import tqdm 
 import os 
 import argparse
+from transformers import AutoTokenizer, AutoModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--path', default='/home/doolee13/ReviewDiff/preprocess/data', type=str)
@@ -19,8 +20,12 @@ for path in pretrain_meta_pathes + pretrain_seq_pathes:
 def extract_meta_data(path, meta_data, selected_asins):
     title_len = 0
     total_num = 0
+    # this is temporary code 
+    model_name = f"prajjwal1/bert-tiny"
+    model, tokenizer = AutoModel.from_pretrained(model_name), AutoTokenizer.from_pretrained(model_name)  
+    model = model.to('cuda')
     with gzip.open(path) as f:
-        for line in tqdm(f, ncols=100):
+        for line in tqdm(f):
             line = json.loads(line)
             attr_dict = dict()
             asin = line['asin']
@@ -37,6 +42,15 @@ def extract_meta_data(path, meta_data, selected_asins):
             attr_dict['title'] = title
             attr_dict['brand'] = brand
             attr_dict['category'] = cat
+
+            sentence = f"This product, titled '{title}' and branded as {brand}, falls under the category of {cat}."
+            # this is temporary code 
+            inputs = tokenizer(sentence, return_tensors="pt", max_length=512, truncation=True, add_special_tokens=False)
+            inputs = inputs.to('cuda')
+            outputs = model(**inputs)
+            outputs = outputs.last_hidden_state[:, 0, :].detach().cpu().numpy()
+            attr_dict['embedding'] = outputs.squeeze().tolist()
+
             meta_data[asin] = attr_dict
     return title_len, total_num
 

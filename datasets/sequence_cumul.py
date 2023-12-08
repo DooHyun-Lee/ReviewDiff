@@ -6,13 +6,13 @@ from copy import deepcopy
 from tqdm import tqdm
 from transformers import DistilBertModel, DistilBertTokenizer
 from transformers import AutoTokenizer, AutoModel
-#from .buffer import ReplayBuffer
 from .normalization import DatasetNormalizer 
 import numpy as np
 
 RewardBatch = namedtuple('Batch', 'trajectories conditions returns')
 TestBatch = namedtuple('Batch', 'trajectories labels')
 Batch = namedtuple('Batch', 'trajectories conditions')
+VaeBatch = namedtuple('Batch', 'trajectories')
 
 class ReplayBuffer:
     def __init__(self, num_episodes, max_traj_len, embed_dim):
@@ -62,9 +62,10 @@ class SequenceDataset(torch.utils.data.Dataset):
             trajectories = self.preprocess_data(train_data, self.model, self.tokenizer, save_path)
         
         n_episodes = len(trajectories)
-        if self.mode == 'train':
+        if self.mode in ['train', 'vae_train']:
             trajectories = trajectories[:int(n_episodes * 0.8)]
-        elif self.mode == 'eval':
+        # ignore vae
+        elif self.mode in ['eval', 'vae_eval']:
             trajectories = trajectories[int(n_episodes * 0.8):int(n_episodes * 0.95)]
         elif self.mode == 'test':
             trajectories = trajectories[int(n_episodes * 0.95):]
@@ -75,6 +76,8 @@ class SequenceDataset(torch.utils.data.Dataset):
             self.buffer.add_traj(trajectory)
 
         self.indices = self.make_indices(self.buffer._dict['traj_lens'], self.horizon)
+        # ignore vae part
+        #self.indices_vae = self.make_indices_vae(self.buffer._dict['traj_lens'])
 
         self.obs_dim = self.embed_dim
         self.action_dim = 1
@@ -84,15 +87,27 @@ class SequenceDataset(torch.utils.data.Dataset):
             idx = self.asin_id_dict[k]
             self.embedding_lookup[idx] = np.array(v['embedding'])
 
-        # TODO : make normalizor for obs and action? 
-        self.normalizer = DatasetNormalizer(self.buffer, normalizer='CDFNormalizer', path_lengths=self.buffer._dict['traj_lens'])
-        self.normalize()
+        # no big difference 
+        #self.normalizer = DatasetNormalizer(self.buffer, normalizer='CDFNormalizer', path_lengths=self.buffer._dict['traj_lens'])
+        #self.normalize()
         
     def normalize(self, keys=['embeddings']):
         for key in keys:
             array = self.buffer._dict[key].reshape(self.n_episodes*self.max_traj_len, -1)
             normed = self.normalizer(array, key)
             self.buffer._dict[f'normed_{key}'] = normed.reshape(self.n_episodes, self.max_traj_len, -1)
+
+    # added for vae
+    # ignore vae part 
+    def make_indices_vae(self, traj_lens):
+        indices = []
+        for i, path_length in enumerate(traj_lens):
+            # path_length : actual length (idx contains until path_length -1)
+            max_start = path_length - 1
+            for start in range(max_start):
+                indices.append((i, start))
+        indices = np.array(indices)
+        return indices
     
     def make_indices(self, traj_lens, horizon):
         indices = []
@@ -172,6 +187,8 @@ class SequenceDataset(torch.utils.data.Dataset):
     def __len__(self):
         if self.mode == 'test':
             return len(self.buffer._dict['traj_lens'])
+        elif self.mode in ['vae_train', 'vae_eval']:
+            return len(self.indices_vae)
         else:
             assert self.mode in ['train', 'eval']
             return len(self.indices)
@@ -179,32 +196,28 @@ class SequenceDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         if self.mode == 'test':
             last_traj_idx = self.buffer._dict['traj_lens'][idx] -1
-            traj = self.buffer._dict['normed_embeddings'][idx, last_traj_idx-1, :] # modified!
-            #traj2 = self.buffer._dict['embeddings'][idx, last_traj_idx, :]
-            #traj = np.concatenate((traj, traj2), axis=-1, dtype=np.float32)
+            #traj = self.buffer._dict['normed_embeddings'][idx, last_traj_idx-1, :] # modified!
+            traj = self.buffer._dict['embeddings'][idx, last_traj_idx-1, :] # modified!
             # TODO : fix this part..?  
             label = self.buffer._dict['actions'][idx, last_traj_idx-1]
             batch = TestBatch({0: traj}, label)
 
+        # ignore vae part 
+        elif self.mode in ['vae_train', 'vae_eval']:
+            traj_idx, start = self.indices_vae[idx]
+            state_t = self.buffer._dict['normed_embeddings'][traj_idx, start] # [obs_dim]
+            state_t_1 = self.buffer._dict['normed_embeddings'][traj_idx, start+1] # [obs_dim]
+            action_t = self.buffer._dict['actions'][traj_idx, start] # [1]
+            # contain (a_t, s_t, s_t_1)
+            trajectories = np.concatenate([action_t, state_t, state_t_1], axis=-1, dtype=np.float32)
+            batch = VaeBatch(trajectories)
+
         else:
             traj_idx, start, end = self.indices[idx]
-
-            #TODO : implement obs normalization? 
             # modified!
-            observations = self.buffer._dict['normed_embeddings'][traj_idx, start:end] # [horizon, obs_dim]
+            # observations = self.buffer._dict['normed_embeddings'][traj_idx, start:end] # [horizon, obs_dim]
+            observations = self.buffer._dict['embeddings'][traj_idx, start:end] # [horizon, obs_dim]
             actions = self.buffer._dict['actions'][traj_idx, start:end] # [horizon, 1]
-            '''
-            # we will use cummulative states
-            obs_copy = deepcopy(observations)
-            #TODO : implement this in matrix form
-            for i in range(1, self.horizon):
-                weights = np.power(self.weight_factor, np.arange(i+1))
-                weights /= np.sum(weights)
-                obs_i = np.zeros(observations.shape[1])
-                for j, weight in enumerate(weights):
-                    obs_i += obs_copy[j] * weight
-                observations[i] = obs_i
-            '''
             conditions = self.get_conditions(observations)
             trajectories = np.concatenate([actions, observations], axis=-1, dtype=np.float32) # [horizon, 1 + obs_dim]       
             if self.include_returns:

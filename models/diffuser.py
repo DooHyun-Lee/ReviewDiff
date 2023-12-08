@@ -14,6 +14,18 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
     return torch.tensor(betas_clipped, dtype=dtype)
 
+def linear_beta_schedule(timesteps, start, end, dtype=torch.float32):
+    return torch.linspace(start, end, timesteps, dtype=dtype)
+
+def linear_variance_beta_schedule(timesteps, start, end, dtype=torch.float32):
+    variance = torch.linspace(start, end, timesteps, dtype=dtype)
+    alpha_bar = 1- variance
+    betas = []
+    betas.append(1-alpha_bar[0])
+    for i in range(1, timesteps):
+        betas.append(min(1-alpha_bar[i] / alpha_bar[i-1], 0.999))
+    return torch.tensor(betas, dtype=dtype)
+
 class WeightedStateLoss(nn.Module):
     def __init__(self, weights):
         super().__init__()
@@ -48,6 +60,18 @@ class GaussianDiffusion(nn.Module):
         self.train_only_diff = train_only_diff
 
         betas = cosine_beta_schedule(n_timesteps) #(n_timesteps,)
+
+        # this terms are for smaller noise 
+        self.noise_scale = 0.005
+        self.noise_min = 0.001
+        self.noise_max = 0.005
+        start = self.noise_scale * self.noise_min
+        end = self.noise_scale * self.noise_max
+        # choice 1
+        betas = linear_variance_beta_schedule(n_timesteps, start, end)
+        # choice 2
+        #betas = linear_beta_schedule(n_timesteps, start, end)
+
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
         alphas_cumprod_prev = torch.cat([torch.ones(1), alphas_cumprod[:-1]])

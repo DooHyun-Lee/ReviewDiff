@@ -13,17 +13,36 @@
       - review(numpy type review between 1~5)
       - item id(asin)
 
+4) run sequence_cumul.py under datasets/ directory 
+    - change the load, save path to your preprocess directory ! 
+    - this will create embeddings_cls.json under preprocess directory
+
+5) Run train_main.py for whole training and evaluation 
+
 # Data folder structure
 ```
-├── embeddings
-│   └── distilbert
-│       └── embeddings_768.pckl
-├── preprocessed
-│   ├── meta_data.json
-│   └── train_data.json
-└── raw
-    ├── Automotive_5.json.gz
-    └── meta_Automotive.json.gz
+├── train_main.py 
+├── datasets 
+│   ├── sequence_cumul.py 
+│   ├── normalization.py 
+│   └── (ignore) sequence.py
+├── models 
+│   ├── diffuser.py
+│   ├── unet.py
+│   ├── unet_components.py
+│   └── inverse_model.py
+├── trainer 
+│   ├── train.py
+│   └── ranker.py
+└── preprocess
+    ├── data
+    │   ├── {category}_5.json.gz
+    │   └── meta_{category}.json.gz
+    ├── meta_preprocess.py
+    ├── seq_process.py
+    ├── meta_data.json(should create)
+    ├── train_data.json(should create)
+    └── embeddings_cls.json(should create)
 ```
 
 # Preprocessed data format
@@ -51,6 +70,11 @@ It has type `Dict[str, dict]` and contains 79317 keys.
 
 # Embeddings
 The embeddings are stored in a pickle file, organized as a list of trajectories, where each trajectory is a list of dictionaries corresponding to products. Each dictionary in a trajectory contains the following keys:
-- embedding: A NumPy array representing the sentence embedding of the product's attributes. The embeddings are generated using the DistilBERT model and currently have a dimension of 768.
+- embedding: A NumPy array representing the sentence embedding of the product's attributes. The embeddings are generated using the DistilBERT model and currently have a dimension of 128.
 - review: The review rating of the product.
 - asin: The Amazon Standard Identification Number (ASIN) of the product.
+
+# DataLoader 
+- provides [bsize, horizon, action_dim + obs_emb_dim] patches of trajectories 
+- action_dim is 1, indicating integer value of each item
+- obs_dim is 128, representing cumulated state 
