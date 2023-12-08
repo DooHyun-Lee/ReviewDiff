@@ -1,3 +1,5 @@
+# TODO : replace diffusion.py, unet.py with https://github.com/XiangLi1999/Diffusion-LM/tree/main
+
 # Preprocessing steps
 1) download and place {category}_5_.json.gz and meta_{category}.json.gz file in preprocess/data directory. 
     - you could download file [here](https://cseweb.ucsd.edu/~jmcauley/datasets/amazon_v2/)
